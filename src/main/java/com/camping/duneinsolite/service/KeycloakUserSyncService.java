@@ -9,6 +9,7 @@ import com.camping.duneinsolite.model.User;
 import com.camping.duneinsolite.model.enums.LoyaltyTier;
 import com.camping.duneinsolite.model.enums.UserRole;
 import com.camping.duneinsolite.repository.UserRepository;
+import com.camping.duneinsolite.service.impl.EmailService;
 import jakarta.ws.rs.core.Response;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +34,7 @@ public class KeycloakUserSyncService {
 
     private final Keycloak keycloak;
     private final UserRepository userRepository;
+    private final EmailService emailService;
 
     @Value("${keycloak.realm}")
     private String realm;
@@ -82,7 +84,6 @@ public class KeycloakUserSyncService {
 
     @Transactional
     public User adminCreateUser(UserRequest request) {
-        // Generate a random secure password — admin does NOT choose it
         String generatedPassword = generateSecurePassword();
         log.info("Generated temporary password for new user {}", request.getEmail());
 
@@ -106,16 +107,15 @@ public class KeycloakUserSyncService {
                 .role(request.getRole())
                 .loyaltyPoints(0)
                 .loyaltyTier(LoyaltyTier.BRONZE)
-                // PARTENAIRE fields
                 .matriculeFiscal(request.getRole() == UserRole.PARTENAIRE ? request.getMatriculeFiscal() : null)
                 .agencyAddress(request.getRole()   == UserRole.PARTENAIRE ? request.getAgencyAddress()   : null)
                 .build();
 
         User savedUser = userRepository.save(user);
-        log.info("User {} created by admin and saved with id {}", request.getEmail(), savedUser.getUserId());
+        log.info("User {} created and saved with id {}", request.getEmail(), savedUser.getUserId());
 
-        // TODO: send email to user with their generated password
-        // emailService.sendWelcomeEmail(request.getEmail(), request.getName(), generatedPassword);
+        // ── Send welcome email with generated password ──
+        emailService.sendWelcomeEmail(request.getEmail(), request.getName(), generatedPassword);
 
         return savedUser;
     }

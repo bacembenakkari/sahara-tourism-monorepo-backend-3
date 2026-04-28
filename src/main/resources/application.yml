@@ -33,6 +33,20 @@ spring:
         jwt:
           issuer-uri: http://localhost:8180/realms/duneinsolite
 
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: bacemakkari25@gmail.com
+    password: wfze sgwp oxwl zmeh
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+        debug: false                      # set to true temporarily if emails aren't sending
+
 keycloak:
   admin:
     server-url: http://localhost:8180
@@ -43,3 +57,10 @@ keycloak:
 
 server:
   port: 8080
+
+# ── App-level properties (used in EmailService) ─────────────────
+app:
+  mail:
+    from: noreply@duneinsolite.com        # display sender address in outgoing emails
+  frontend:
+    url: http://localhost:4200            # ← replace with your deployed frontend URL in production
