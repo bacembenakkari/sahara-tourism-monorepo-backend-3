@@ -412,7 +412,7 @@ public class ReservationServiceImpl implements ReservationService {
         if (current == ReservationStatus.CANCELLED) {
             throw new ReservationStatusException("This reservation has already been cancelled and cannot be modified.");
         }
-// ✅ REPLACE WITH THIS
+
         if (current == ReservationStatus.CHECKED_IN && status != ReservationStatus.COMPLETED) {
             throw new ReservationStatusException("A checked-in reservation can only be marked as completed.");
         }
@@ -445,6 +445,9 @@ public class ReservationServiceImpl implements ReservationService {
         if (status == ReservationStatus.REJECTED) {
             reservation.setRejectionReason(rejectionReason);
         }
+        if (status == ReservationStatus.COMPLETED) {
+            reservation.setCompletedAt(LocalDateTime.now());
+        }
 
         Reservation savedReservation = reservationRepository.save(reservation);
 
@@ -472,6 +475,7 @@ public class ReservationServiceImpl implements ReservationService {
                 confirmMessage = "Votre réservation pour le groupe \""
                         + savedReservation.getGroupName() + "\" a été confirmée.";
             }
+
 
             // ── Notify client/partenaire ──────────────────────────────────
             notificationPublisher.publish(
@@ -549,6 +553,84 @@ public class ReservationServiceImpl implements ReservationService {
                         .build());
             }
             invoiceRepository.save(proforma);
+        }
+        if (status == ReservationStatus.COMPLETED) {
+
+            double rawTotal =
+                    (savedReservation.getTotalAmount()       != null ? savedReservation.getTotalAmount()       : 0.0)
+                            + (savedReservation.getTotalExtrasAmount() != null ? savedReservation.getTotalExtrasAmount() : 0.0);
+
+            Currency currency      = savedReservation.getCurrency() != null ? savedReservation.getCurrency() : Currency.TND;
+            double timbreFiscal    = getTimbreFiscal(currency);
+            double totalHt         = Math.round((rawTotal / 1.07) * 1000.0) / 1000.0;
+            double tvaAmount       = Math.round((totalHt * 0.07) * 1000.0) / 1000.0;
+            double totalTtc        = Math.round((totalHt + tvaAmount + timbreFiscal) * 1000.0) / 1000.0;
+
+            PaymentSummary paid    = paymentService.computePaymentSummary(savedReservation);
+            double paidSoFar       = paid.getTotalPaid();
+
+            PaymentStatus facturePaymentStatus;
+            if (paidSoFar <= 0)              facturePaymentStatus = PaymentStatus.UNPAID;
+            else if (paidSoFar < totalTtc)   facturePaymentStatus = PaymentStatus.PARTIALLY_PAID;
+            else                             facturePaymentStatus = PaymentStatus.PAID;
+
+            LocalDate completedDate = savedReservation.getCompletedAt().toLocalDate();
+
+            Invoice facture = Invoice.builder()
+                    .invoiceNumber(generateFactureNumber())
+                    .invoiceType(InvoiceType.STANDARD)
+                    .invoiceDate(completedDate)
+                    .totalAmount(rawTotal)
+                    .totalHt(totalHt)
+                    .tvaRate(7.0)
+                    .tvaAmount(tvaAmount)
+                    .timbreFiscal(timbreFiscal)
+                    .totalTtc(totalTtc)
+                    .paidAmount(paidSoFar)
+                    .status(InvoiceStatus.DRAFT)
+                    .paymentStatus(facturePaymentStatus)
+                    .currency(currency)
+                    .reservation(savedReservation)
+                    .user(savedReservation.getUser())
+                    .build();
+
+            int line = 1;
+            if (savedReservation.getTotalAmount() != null && savedReservation.getTotalAmount() > 0) {
+                String label = savedReservation.getReservationType() == ReservationType.TOURS
+                        ? "Tours" : "Hébergement";
+                facture.addItem(InvoiceItem.builder()
+                        .description(label)
+                        .itemType(label.toUpperCase())
+                        .quantity(1)
+                        .unitPrice(savedReservation.getTotalAmount())
+                        .lineNumber(line++)
+                        .build());
+            }
+            if (savedReservation.getTotalExtrasAmount() != null && savedReservation.getTotalExtrasAmount() > 0) {
+                facture.addItem(InvoiceItem.builder()
+                        .description("Extras")
+                        .itemType("EXTRA")
+                        .quantity(1)
+                        .unitPrice(savedReservation.getTotalExtrasAmount())
+                        .lineNumber(line)
+                        .build());
+            }
+
+            invoiceRepository.save(facture);
+
+            // Notify user
+            notificationPublisher.publish(
+                    RabbitMQConfig.RESERVATION_CONFIRMED,
+                    NotificationMessage.builder()
+                            .targetUserId(savedReservation.getUser().getUserId())
+                            .type(NotificationType.RESERVATION_CONFIRMED)
+                            .reservationId(savedReservation.getReservationId())
+                            .title("Réservation terminée")
+                            .message("Votre réservation pour le groupe \""
+                                    + savedReservation.getGroupName()
+                                    + "\" est terminée. Votre facture est disponible.")
+                            .build()
+            );
         }
 
         if (status == ReservationStatus.REJECTED) {
@@ -741,6 +823,11 @@ public class ReservationServiceImpl implements ReservationService {
         // PRO-00001 format — separate sequence from INV-
         long count = invoiceRepository.count() + 1;
         return String.format("PRO-%05d", count);
+    }
+    private String generateFactureNumber() {
+        int year = LocalDate.now().getYear();
+        long count = invoiceRepository.countByInvoiceType(InvoiceType.STANDARD) + 1;
+        return String.format("FAC-%d/%d", count, year);
     }
     private ReservationResponse toEnrichedResponse(Reservation reservation) {
         ReservationResponse response = reservationMapper.toResponse(reservation);
@@ -1102,8 +1189,10 @@ public class ReservationServiceImpl implements ReservationService {
     @Override
     @Transactional(readOnly = true)
     public List<ReservationResponse> getCampingActiveReservations() {
-        LocalDate today = LocalDate.now();
-        return reservationRepository.findCampingActive(today)
+        LocalDate today   = LocalDate.now();
+        LocalDateTime cutoff = LocalDateTime.now().minusHours(24);
+
+        return reservationRepository.findCampingActive(today, cutoff)
                 .stream()
                 .map(this::toEnrichedResponse)
                 .toList();
@@ -1136,5 +1225,13 @@ public class ReservationServiceImpl implements ReservationService {
                 .stream()
                 .map(this::toEnrichedResponse)
                 .toList();
+    }
+
+    private double getTimbreFiscal(Currency currency) {
+        return switch (currency) {
+            case TND -> 1.000;
+            case EUR -> Math.round((1.0 / 3.4) * 1000.0) / 1000.0;  // 0.294
+            case USD -> Math.round((1.0 / 2.5) * 1000.0) / 1000.0;  // 0.400
+        };
     }
 }

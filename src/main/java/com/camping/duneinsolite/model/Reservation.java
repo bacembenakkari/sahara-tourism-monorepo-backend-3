@@ -44,6 +44,9 @@ public class Reservation {
     @Column(name = "service_date")
     private LocalDate serviceDate;
 
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
     @Column(name = "group_name")
     private String groupName;
 

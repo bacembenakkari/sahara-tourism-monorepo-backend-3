@@ -5,6 +5,7 @@ import com.camping.duneinsolite.dto.response.InvoiceResponse;
 import com.camping.duneinsolite.mapper.InvoiceMapper;
 import com.camping.duneinsolite.model.*;
 import com.camping.duneinsolite.model.enums.InvoiceStatus;
+import com.camping.duneinsolite.model.enums.InvoiceType;
 import com.camping.duneinsolite.model.enums.PaymentStatus;
 import com.camping.duneinsolite.repository.*;
 import com.camping.duneinsolite.service.InvoiceService;
@@ -29,8 +30,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         Reservation reservation = reservationRepository.findById(request.getReservationId())
                 .orElseThrow(() -> new RuntimeException("Reservation not found: " + request.getReservationId()));
 
-        User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new RuntimeException("User not found: " + request.getUserId()));
+        // ── Take user from reservation, not from request ──
+        User user = reservation.getUser();
 
         Invoice invoice = Invoice.builder()
                 .invoiceNumber(generateInvoiceNumber())
@@ -44,7 +45,6 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .user(user)
                 .build();
 
-        // Add line items
         request.getItems().forEach(itemReq -> {
             InvoiceItem item = InvoiceItem.builder()
                     .description(itemReq.getDescription())
@@ -109,4 +109,25 @@ public class InvoiceServiceImpl implements InvoiceService {
         return invoiceRepository.findById(invoiceId)
                 .orElseThrow(() -> new RuntimeException("Invoice not found: " + invoiceId));
     }
+
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<InvoiceResponse> getAllFactures() {
+        return invoiceRepository.findByInvoiceType(InvoiceType.STANDARD)
+                .stream()
+                .map(invoiceMapper::toResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<InvoiceResponse> getFacturesByReservation(UUID reservationId) {
+        return invoiceRepository
+                .findByInvoiceTypeAndReservationReservationId(InvoiceType.STANDARD, reservationId)
+                .stream()
+                .map(invoiceMapper::toResponse)
+                .toList();
+    }
+
 }

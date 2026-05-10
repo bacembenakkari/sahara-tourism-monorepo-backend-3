@@ -14,4 +14,7 @@ public interface InvoiceService {
     List<InvoiceResponse> getInvoicesByUser(UUID userId);
     InvoiceResponse updateInvoice(UUID invoiceId, InvoiceRequest request);
     void deleteInvoice(UUID invoiceId);
+
+    List<InvoiceResponse> getAllFactures();
+    List<InvoiceResponse> getFacturesByReservation(UUID reservationId);
 }

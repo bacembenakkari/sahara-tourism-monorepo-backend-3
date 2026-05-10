@@ -13,7 +13,7 @@ public class InvoiceRequest {
     @NotNull(message = "Reservation ID is required")
     private UUID reservationId;
 
-    @NotNull(message = "User ID is required")
+
     private UUID userId;
 
     @NotNull(message = "Invoice type is required")

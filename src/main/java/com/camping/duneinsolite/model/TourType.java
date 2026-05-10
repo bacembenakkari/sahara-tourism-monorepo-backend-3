@@ -43,6 +43,4 @@ public class TourType {
     @Builder.Default
     private Boolean isActive = true;
 
-    // No more @ManyToMany back-reference to Reservation
-    // TourType is now a pure catalog — clean and simple
 }

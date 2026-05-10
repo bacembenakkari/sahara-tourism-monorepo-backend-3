@@ -62,4 +62,17 @@ public class InvoiceController {
         invoiceService.deleteInvoice(invoiceId);
         return ResponseEntity.noContent().build();
     }
+
+
+    @GetMapping("/factures")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CAMPING')")
+    public ResponseEntity<List<InvoiceResponse>> getAllFactures() {
+        return ResponseEntity.ok(invoiceService.getAllFactures());
+    }
+
+    @GetMapping("/factures/reservation/{reservationId}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<List<InvoiceResponse>> getFacturesByReservation(@PathVariable UUID reservationId) {
+        return ResponseEntity.ok(invoiceService.getFacturesByReservation(reservationId));
+    }
 }

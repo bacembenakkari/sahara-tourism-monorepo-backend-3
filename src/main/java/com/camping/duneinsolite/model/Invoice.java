@@ -64,6 +64,22 @@ public class Invoice {
     @Builder.Default
     private PaymentStatus paymentStatus = PaymentStatus.UNPAID;
 
+    @Column(name = "total_ht")
+    private Double totalHt;
+
+    @Column(name = "tva_rate")
+    @Builder.Default
+    private Double tvaRate = 7.0;
+
+    @Column(name = "tva_amount")
+    private Double tvaAmount;
+
+    @Column(name = "timbre_fiscal")
+    private Double timbreFiscal;
+
+    @Column(name = "total_ttc")
+    private Double totalTtc;
+
     // remainingAmount is computed, not stored
     @Transient
     public Double getRemainingAmount() {

@@ -23,7 +23,20 @@ public class InvoiceResponse {
     private PaymentStatus paymentStatus;
     private Currency currency;
     private UUID reservationId;
+
+    //
     private UUID userId;
     private String userName;
+    private String userEmail;
+    private String userPhone;
+    private String userMatriculeFiscal;
+    private String userAgencyAddress;
+    private Double totalHt;
+    private Double tvaRate;
+    private Double tvaAmount;
+    private Double timbreFiscal;
+    private Double totalTtc;
+    private String arreteLaPresente;
+
     private List<InvoiceItemResponse> items;
 }
