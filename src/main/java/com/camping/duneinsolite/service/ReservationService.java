@@ -2,6 +2,7 @@ package com.camping.duneinsolite.service;
 
 
 import com.camping.duneinsolite.dto.request.*;
+import com.camping.duneinsolite.dto.response.CampingStatsResponse;
 import com.camping.duneinsolite.dto.response.ReservationResponse;
 import com.camping.duneinsolite.model.enums.ReservationStatus;
 
@@ -39,5 +40,7 @@ public interface ReservationService {
     List<ReservationResponse> getCampingActiveReservationsByDate(LocalDate date);
     List<ReservationResponse> searchCampingReservationsByName(String name);
     List<ReservationResponse> getCampingReservationsByStatus(ReservationStatus status);
+
+    CampingStatsResponse getCampingStats();
 
 }

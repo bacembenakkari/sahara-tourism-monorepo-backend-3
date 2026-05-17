@@ -149,4 +149,15 @@ public class GlobalExceptionHandler {
                 null
         );
     }
+    // ── Handle repartition validation errors ──────────────────────────
+    @ExceptionHandler(RepartitionValidationException.class)
+    public ResponseEntity<Map<String, Object>> handleRepartitionValidation(
+            RepartitionValidationException ex) {
+
+        return buildResponse(
+                HttpStatus.UNPROCESSABLE_ENTITY,  // 422 — same as reservation status errors
+                ex.getMessage(),
+                null
+        );
+    }
 }

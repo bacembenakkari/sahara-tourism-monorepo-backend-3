@@ -43,6 +43,7 @@ public class ReservationResponse {
 
     // Full transaction history — each payment event with its date
     private List<TransactionResponse> transactions;
+    private List<RepartitionResponse> repartitions;
 
     private SourceResponse source;
     private List<GuideResponse> guides;

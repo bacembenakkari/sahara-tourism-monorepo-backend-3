@@ -4,7 +4,9 @@ import com.camping.duneinsolite.config.CurrencyConfig;
 import com.camping.duneinsolite.config.RabbitMQConfig;
 import com.camping.duneinsolite.dto.message.NotificationMessage;
 import com.camping.duneinsolite.dto.request.*;
+import com.camping.duneinsolite.dto.response.CampingStatsResponse;
 import com.camping.duneinsolite.dto.response.ReservationResponse;
+import com.camping.duneinsolite.exception.RepartitionValidationException;
 import com.camping.duneinsolite.exception.ReservationStatusException;
 import com.camping.duneinsolite.mapper.ReservationMapper;
 import com.camping.duneinsolite.model.*;
@@ -138,6 +140,43 @@ public class ReservationServiceImpl implements ReservationService {
             }
         }
 
+        private void validateRepartitions(List<RepartitionRequest> repartitions, int globalAdults, int globalChildren) {
+            if (repartitions == null || repartitions.isEmpty()) return;
+
+            int globalTotal = globalAdults + globalChildren;
+
+            repartitions.forEach(r -> {
+                if (r.getNumberOfTentes() < 1) {
+                    throw new RepartitionValidationException(
+                            "Le nombre de tentes doit être au moins 1."
+                    );
+                }
+            });
+
+            // ── Total repartition must not EXCEED global group size ──
+            int totalPersonnes = repartitions.stream()
+                    .mapToInt(r -> r.getNumberOfTentes() * r.getTenteType().getCapacity())
+                    .sum();
+
+            if (totalPersonnes > globalTotal) {
+                throw new RepartitionValidationException(
+                        "La répartition des tentes (" + totalPersonnes + " personnes) " +
+                                "dépasse le nombre total de personnes du groupe (" + globalTotal + ")."
+                );
+            }
+        }
+        private void applyRepartitions(List<RepartitionRequest> repartitions, Reservation reservation) {
+            if (repartitions == null || repartitions.isEmpty()) return;
+
+            repartitions.forEach(r -> {
+                ReservationRepartition repartition = ReservationRepartition.builder()
+                        .tenteType(r.getTenteType())
+                        .numberOfTentes(r.getNumberOfTentes())
+                        .build();
+                reservation.addRepartition(repartition);
+            });
+        }
+
     // ── Base reservation builder ──────────────────────────────────────────────────
 
         private Reservation buildBaseReservation(ReservationRequest request, User user,
@@ -170,7 +209,12 @@ public class ReservationServiceImpl implements ReservationService {
                                            int globalAdults, int globalChildren,
                                            boolean isPartner) {
             switch (type) {
-                case HEBERGEMENT -> applyHebergementItems(request, reservation, globalAdults, globalChildren, isPartner);
+                case HEBERGEMENT -> {
+                    applyHebergementItems(request, reservation, globalAdults, globalChildren, isPartner);
+                    // new validation of Repartition
+                    validateRepartitions(request.getRepartitions(), globalAdults, globalChildren);
+                    applyRepartitions(request.getRepartitions(), reservation);
+                }
                 case TOURS       -> applyToursItems(request, reservation, globalAdults, globalChildren, isPartner);
                 case EXTRAS      -> reservation.setTotalAmount(null);
             }
@@ -782,7 +826,13 @@ public class ReservationServiceImpl implements ReservationService {
             });
             reservation.setTotalExtrasAmount(reservation.calculateTotalExtrasAmount());
         }
-
+        if (request.getRepartitions() != null) {
+            int globalAdults   = reservation.getNumberOfAdults();
+            int globalChildren = reservation.getNumberOfChildren();
+            validateRepartitions(request.getRepartitions(), globalAdults, globalChildren);
+            reservation.getRepartitions().clear();
+            applyRepartitions(request.getRepartitions(), reservation);
+        }
         Reservation savedReservation = reservationRepository.save(reservation);
 
         notificationPublisher.publish(
@@ -1233,5 +1283,30 @@ public class ReservationServiceImpl implements ReservationService {
             case EUR -> Math.round((1.0 / 3.4) * 1000.0) / 1000.0;  // 0.294
             case USD -> Math.round((1.0 / 2.5) * 1000.0) / 1000.0;  // 0.400
         };
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CampingStatsResponse getCampingStats() {
+        LocalDate today = LocalDate.now();
+
+        // ── Stat 1: In Camp ───────────────────────────────────────
+        List<Reservation> inCamp = reservationRepository.findCampingCheckedIn();
+        int inCampAdults   = inCamp.stream().mapToInt(r -> r.getNumberOfAdults()   != null ? r.getNumberOfAdults()   : 0).sum();
+        int inCampChildren = inCamp.stream().mapToInt(r -> r.getNumberOfChildren() != null ? r.getNumberOfChildren() : 0).sum();
+
+        // ── Stat 2: Arriving Today ────────────────────────────────
+        List<Reservation> arriving = reservationRepository.findCampingArrivingToday(today);
+        int arrivingAdults   = arriving.stream().mapToInt(r -> r.getNumberOfAdults()   != null ? r.getNumberOfAdults()   : 0).sum();
+        int arrivingChildren = arriving.stream().mapToInt(r -> r.getNumberOfChildren() != null ? r.getNumberOfChildren() : 0).sum();
+
+        return CampingStatsResponse.builder()
+                .inCampAdults(inCampAdults)
+                .inCampChildren(inCampChildren)
+                .inCampTotal(inCampAdults + inCampChildren)
+                .arrivingTodayAdults(arrivingAdults)
+                .arrivingTodayChildren(arrivingChildren)
+                .arrivingTodayTotal(arrivingAdults + arrivingChildren)
+                .build();
     }
 }

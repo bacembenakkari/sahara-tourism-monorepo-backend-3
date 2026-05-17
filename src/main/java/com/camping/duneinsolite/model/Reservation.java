@@ -139,6 +139,10 @@ public class Reservation {
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
+    @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<ReservationRepartition> repartitions = new ArrayList<>();
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = LocalDateTime.now();
@@ -231,5 +235,15 @@ public class Reservation {
     public void removeChauffeur(Chauffeur chauffeur) {
         chauffeurs.remove(chauffeur);
         chauffeur.setReservation(null);
+    }
+
+    public void addRepartition(ReservationRepartition r) {
+        repartitions.add(r);
+        r.setReservation(this);
+    }
+
+    public void removeRepartition(ReservationRepartition r) {
+        repartitions.remove(r);
+        r.setReservation(null);
     }
 }

@@ -2,6 +2,7 @@ package com.camping.duneinsolite.controller;
 
 
 import com.camping.duneinsolite.dto.request.*;
+import com.camping.duneinsolite.dto.response.CampingStatsResponse;
 import com.camping.duneinsolite.dto.response.ReservationResponse;
 import com.camping.duneinsolite.model.enums.ReservationStatus;
 import com.camping.duneinsolite.service.ReservationService;
@@ -181,6 +182,12 @@ public class ReservationController {
     public ResponseEntity<List<ReservationResponse>> getCampingByStatus(
             @RequestParam ReservationStatus status) {
         return ResponseEntity.ok(reservationService.getCampingReservationsByStatus(status));
+    }
+
+    @GetMapping("/camping/stats")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CAMPING')")
+    public ResponseEntity<CampingStatsResponse> getCampingStats() {
+        return ResponseEntity.ok(reservationService.getCampingStats());
     }
 }
 

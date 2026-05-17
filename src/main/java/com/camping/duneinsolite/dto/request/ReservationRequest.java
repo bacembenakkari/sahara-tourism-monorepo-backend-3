@@ -53,6 +53,8 @@ public class ReservationRequest {
 
     private List<ParticipantRequest> participants;
     private List<ReservationExtraRequest> extras;
+    private List<RepartitionRequest> repartitions;
+
     // ── NEW — Optional initial payment at reservation creation time ──
     // If provided → a Transaction is created immediately after save
     // If null     → reservation is created with paymentStatus = UNPAID
