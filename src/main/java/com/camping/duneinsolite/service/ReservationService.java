@@ -4,6 +4,7 @@ package com.camping.duneinsolite.service;
 import com.camping.duneinsolite.dto.request.*;
 import com.camping.duneinsolite.dto.response.CampingStatsResponse;
 import com.camping.duneinsolite.dto.response.ReservationResponse;
+import com.camping.duneinsolite.model.enums.CompanyType;
 import com.camping.duneinsolite.model.enums.ReservationStatus;
 
 import java.time.LocalDate;
@@ -16,7 +17,7 @@ public interface ReservationService {
     List<ReservationResponse> getAllReservations();
     List<ReservationResponse> getReservationsByUser(UUID userId);
     List<ReservationResponse> getReservationsByStatus(ReservationStatus status);
-    ReservationResponse updateReservationStatus(UUID reservationId, ReservationStatus status, String rejectionReason);
+    ReservationResponse updateReservationStatus(UUID reservationId, ReservationStatus status, String rejectionReason, CompanyType companyType);
     ReservationResponse updateReservation(UUID reservationId, ReservationUpdateRequest request);
     void deleteReservation(UUID reservationId);
     List<ReservationResponse> getMyReservations(UUID userId);

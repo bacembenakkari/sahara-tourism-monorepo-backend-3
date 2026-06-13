@@ -1,5 +1,6 @@
 package com.camping.duneinsolite.model;
 
+import com.camping.duneinsolite.model.enums.CompanyType;
 import com.camping.duneinsolite.model.enums.Currency;
 import com.camping.duneinsolite.model.enums.InvoiceStatus;
 import com.camping.duneinsolite.model.enums.InvoiceType;
@@ -79,6 +80,10 @@ public class Invoice {
 
     @Column(name = "total_ttc")
     private Double totalTtc;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "company_type")
+    private CompanyType companyType;
 
     // remainingAmount is computed, not stored
     @Transient

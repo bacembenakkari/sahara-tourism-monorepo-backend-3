@@ -1,5 +1,6 @@
 package com.camping.duneinsolite.dto.response;
 
+import com.camping.duneinsolite.model.enums.CompanyType;
 import com.camping.duneinsolite.model.enums.Currency;
 import com.camping.duneinsolite.model.enums.InvoiceStatus;
 import com.camping.duneinsolite.model.enums.InvoiceType;
@@ -39,4 +40,5 @@ public class InvoiceResponse {
     private String arreteLaPresente;
 
     private List<InvoiceItemResponse> items;
+    private CompanyType companyType;
 }

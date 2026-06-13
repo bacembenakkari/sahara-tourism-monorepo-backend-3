@@ -4,6 +4,7 @@ package com.camping.duneinsolite.controller;
 import com.camping.duneinsolite.dto.request.*;
 import com.camping.duneinsolite.dto.response.CampingStatsResponse;
 import com.camping.duneinsolite.dto.response.ReservationResponse;
+import com.camping.duneinsolite.model.enums.CompanyType;
 import com.camping.duneinsolite.model.enums.ReservationStatus;
 import com.camping.duneinsolite.service.ReservationService;
 import jakarta.validation.Valid;
@@ -78,8 +79,9 @@ public class ReservationController {
     public ResponseEntity<ReservationResponse> updateStatus(
             @PathVariable UUID reservationId,
             @RequestParam ReservationStatus status,
-            @RequestParam(required = false) String rejectionReason) {
-        return ResponseEntity.ok(reservationService.updateReservationStatus(reservationId, status, rejectionReason));
+            @RequestParam(required = false) String rejectionReason,
+            @RequestParam(required = false) CompanyType companyType) {
+        return ResponseEntity.ok(reservationService.updateReservationStatus(reservationId, status, rejectionReason, companyType));
     }
 
     @PutMapping("/{reservationId}")

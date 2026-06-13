@@ -445,7 +445,7 @@ public class ReservationServiceImpl implements ReservationService {
     }
 
     @Override
-    public ReservationResponse updateReservationStatus(UUID reservationId, ReservationStatus status, String rejectionReason) {
+    public ReservationResponse updateReservationStatus(UUID reservationId, ReservationStatus status, String rejectionReason, CompanyType companyType) {
         Reservation reservation = findById(reservationId);
 
         ReservationStatus current = reservation.getStatus();
@@ -574,107 +574,188 @@ public class ReservationServiceImpl implements ReservationService {
                     .currency(savedReservation.getCurrency())
                     .reservation(savedReservation)
                     .user(savedReservation.getUser())
+                    .companyType(companyType)
                     .build();
 
             int line = 1;
-            if (savedReservation.getTotalAmount() != null && savedReservation.getTotalAmount() > 0) {
-                String mainLabel = savedReservation.getReservationType() == ReservationType.TOURS ? "Tours" : "Hébergement";
-                proforma.addItem(InvoiceItem.builder()
-                        .description(mainLabel)
-                        .itemType(mainLabel.toUpperCase())
-                        .quantity(1)
-                        .unitPrice(savedReservation.getTotalAmount())
-                        .lineNumber(line++)
-                        .build());
+            // ── HEBERGEMENT: one line per tour type ───────────────────────
+            // QTÉ = people assigned to this type, PRIX UNITAIRE = total stay / people
+            if (savedReservation.getReservationType() == ReservationType.HEBERGEMENT
+                    && savedReservation.getTourTypes() != null
+                    && !savedReservation.getTourTypes().isEmpty()) {
+                for (ReservationTourType tt : savedReservation.getTourTypes()) {
+                    int totalPeople = (tt.getNumberOfAdults() != null ? tt.getNumberOfAdults() : 0)
+                            + (tt.getNumberOfChildren() != null ? tt.getNumberOfChildren() : 0);
+                    int qty = totalPeople > 0 ? totalPeople : 1;
+                    // getTotalPrice() = (adults*adultPrice + children*childPrice) * nights
+                    double totalStayPrice = tt.getTotalPrice();
+                    double unitP = Math.round((totalStayPrice / qty) * 1000.0) / 1000.0;
+                    proforma.addItem(InvoiceItem.builder()
+                            .description(tt.getName())
+                            .itemType("HEBERGEMENT")
+                            .quantity(qty)
+                            .unitPrice(unitP)
+                            .lineNumber(line++)
+                            .build());
+                }
+            // ── TOURS: one line per tour ──────────────────────────────────
+            // QTÉ = people assigned, PRIX UNITAIRE = totalTourPrice / people
+            } else if (savedReservation.getReservationType() == ReservationType.TOURS
+                    && savedReservation.getTours() != null
+                    && !savedReservation.getTours().isEmpty()) {
+                for (ReservationTour t : savedReservation.getTours()) {
+                    int totalPeople = (t.getNumberOfAdults() != null ? t.getNumberOfAdults() : 0)
+                            + (t.getNumberOfChildren() != null ? t.getNumberOfChildren() : 0);
+                    int qty = totalPeople > 0 ? totalPeople : 1;
+                    double unitP = t.getTotalPrice() != null
+                            ? Math.round((t.getTotalPrice() / qty) * 1000.0) / 1000.0 : 0.0;
+                    proforma.addItem(InvoiceItem.builder()
+                            .description(t.getName())
+                            .itemType("TOURS")
+                            .quantity(qty)
+                            .unitPrice(unitP)
+                            .lineNumber(line++)
+                            .build());
+                }
             }
-            if (savedReservation.getTotalExtrasAmount() != null && savedReservation.getTotalExtrasAmount() > 0) {
-                proforma.addItem(InvoiceItem.builder()
-                        .description("Extras")
-                        .itemType("EXTRA")
-                        .quantity(1)
-                        .unitPrice(savedReservation.getTotalExtrasAmount())
-                        .lineNumber(line)
-                        .build());
+            // ── EXTRAS: one line per active extra (runs for all reservation types) ──
+            // QTÉ = extra.quantity (e.g. 7 people for quad), PRIX UNITAIRE = extra.unitPrice
+            if (savedReservation.getExtras() != null) {
+                for (ReservationExtra extra : savedReservation.getExtras()) {
+                    if (Boolean.TRUE.equals(extra.getIsActive())) {
+                        proforma.addItem(InvoiceItem.builder()
+                                .description(extra.getName())
+                                .itemType("EXTRA")
+                                .quantity(extra.getQuantity() != null ? extra.getQuantity() : 1)
+                                .unitPrice(extra.getUnitPrice() != null ? extra.getUnitPrice() : 0.0)
+                                .lineNumber(line++)
+                                .build());
+                    }
+                }
             }
             invoiceRepository.save(proforma);
         }
         if (status == ReservationStatus.COMPLETED) {
 
-            double rawTotal =
-                    (savedReservation.getTotalAmount()       != null ? savedReservation.getTotalAmount()       : 0.0)
-                            + (savedReservation.getTotalExtrasAmount() != null ? savedReservation.getTotalExtrasAmount() : 0.0);
+            if (companyType != null) {
+                // ── Generate facture ──────────────────────────────────────
+                double rawTotal =
+                        (savedReservation.getTotalAmount()       != null ? savedReservation.getTotalAmount()       : 0.0)
+                                + (savedReservation.getTotalExtrasAmount() != null ? savedReservation.getTotalExtrasAmount() : 0.0);
 
-            Currency currency      = savedReservation.getCurrency() != null ? savedReservation.getCurrency() : Currency.TND;
-            double timbreFiscal    = getTimbreFiscal(currency);
-            double totalHt         = Math.round((rawTotal / 1.07) * 1000.0) / 1000.0;
-            double tvaAmount       = Math.round((totalHt * 0.07) * 1000.0) / 1000.0;
-            double totalTtc        = Math.round((totalHt + tvaAmount + timbreFiscal) * 1000.0) / 1000.0;
+                Currency currency      = savedReservation.getCurrency() != null ? savedReservation.getCurrency() : Currency.TND;
+                double timbreFiscal    = getTimbreFiscal(currency);
+                double totalHt         = Math.round((rawTotal / 1.07) * 1000.0) / 1000.0;
+                double tvaAmount       = Math.round((totalHt * 0.07) * 1000.0) / 1000.0;
+                double totalTtc        = Math.round((totalHt + tvaAmount + timbreFiscal) * 1000.0) / 1000.0;
 
-            PaymentSummary paid    = paymentService.computePaymentSummary(savedReservation);
-            double paidSoFar       = paid.getTotalPaid();
+                PaymentSummary paid    = paymentService.computePaymentSummary(savedReservation);
+                double paidSoFar       = paid.getTotalPaid();
 
-            PaymentStatus facturePaymentStatus;
-            if (paidSoFar <= 0)              facturePaymentStatus = PaymentStatus.UNPAID;
-            else if (paidSoFar < totalTtc)   facturePaymentStatus = PaymentStatus.PARTIALLY_PAID;
-            else                             facturePaymentStatus = PaymentStatus.PAID;
+                PaymentStatus facturePaymentStatus;
+                if (paidSoFar <= 0)              facturePaymentStatus = PaymentStatus.UNPAID;
+                else if (paidSoFar < totalTtc)   facturePaymentStatus = PaymentStatus.PARTIALLY_PAID;
+                else                             facturePaymentStatus = PaymentStatus.PAID;
 
-            LocalDate completedDate = savedReservation.getCompletedAt().toLocalDate();
+                LocalDate completedDate = savedReservation.getCompletedAt().toLocalDate();
 
-            Invoice facture = Invoice.builder()
-                    .invoiceNumber(generateFactureNumber())
-                    .invoiceType(InvoiceType.STANDARD)
-                    .invoiceDate(completedDate)
-                    .totalAmount(rawTotal)
-                    .totalHt(totalHt)
-                    .tvaRate(7.0)
-                    .tvaAmount(tvaAmount)
-                    .timbreFiscal(timbreFiscal)
-                    .totalTtc(totalTtc)
-                    .paidAmount(paidSoFar)
-                    .status(InvoiceStatus.DRAFT)
-                    .paymentStatus(facturePaymentStatus)
-                    .currency(currency)
-                    .reservation(savedReservation)
-                    .user(savedReservation.getUser())
-                    .build();
+                Invoice facture = Invoice.builder()
+                        .invoiceNumber(generateFactureNumber())
+                        .invoiceType(InvoiceType.STANDARD)
+                        .invoiceDate(completedDate)
+                        .totalAmount(rawTotal)
+                        .totalHt(totalHt)
+                        .tvaRate(7.0)
+                        .tvaAmount(tvaAmount)
+                        .timbreFiscal(timbreFiscal)
+                        .totalTtc(totalTtc)
+                        .paidAmount(paidSoFar)
+                        .status(InvoiceStatus.DRAFT)
+                        .paymentStatus(facturePaymentStatus)
+                        .currency(currency)
+                        .reservation(savedReservation)
+                        .user(savedReservation.getUser())
+                        .companyType(companyType)
+                        .build();
 
-            int line = 1;
-            if (savedReservation.getTotalAmount() != null && savedReservation.getTotalAmount() > 0) {
-                String label = savedReservation.getReservationType() == ReservationType.TOURS
-                        ? "Tours" : "Hébergement";
-                facture.addItem(InvoiceItem.builder()
-                        .description(label)
-                        .itemType(label.toUpperCase())
-                        .quantity(1)
-                        .unitPrice(savedReservation.getTotalAmount())
-                        .lineNumber(line++)
-                        .build());
+                int line = 1;
+                if (savedReservation.getReservationType() == ReservationType.HEBERGEMENT
+                        && savedReservation.getTourTypes() != null
+                        && !savedReservation.getTourTypes().isEmpty()) {
+                    for (ReservationTourType tt : savedReservation.getTourTypes()) {
+                        int totalPeople = (tt.getNumberOfAdults()   != null ? tt.getNumberOfAdults()   : 0)
+                                       + (tt.getNumberOfChildren() != null ? tt.getNumberOfChildren() : 0);
+                        int qty    = totalPeople > 0 ? totalPeople : 1;
+                        double unitP = Math.round((tt.getTotalPrice() / qty) * 1000.0) / 1000.0;
+                        facture.addItem(InvoiceItem.builder()
+                                .description(tt.getName())
+                                .itemType("HEBERGEMENT")
+                                .quantity(qty)
+                                .unitPrice(unitP)
+                                .lineNumber(line++)
+                                .build());
+                    }
+                } else if (savedReservation.getReservationType() == ReservationType.TOURS
+                        && savedReservation.getTours() != null
+                        && !savedReservation.getTours().isEmpty()) {
+                    for (ReservationTour t : savedReservation.getTours()) {
+                        int totalPeople = (t.getNumberOfAdults()   != null ? t.getNumberOfAdults()   : 0)
+                                       + (t.getNumberOfChildren() != null ? t.getNumberOfChildren() : 0);
+                        int qty    = totalPeople > 0 ? totalPeople : 1;
+                        double unitP = t.getTotalPrice() != null
+                                ? Math.round((t.getTotalPrice() / qty) * 1000.0) / 1000.0 : 0.0;
+                        facture.addItem(InvoiceItem.builder()
+                                .description(t.getName())
+                                .itemType("TOURS")
+                                .quantity(qty)
+                                .unitPrice(unitP)
+                                .lineNumber(line++)
+                                .build());
+                    }
+                }
+                if (savedReservation.getExtras() != null) {
+                    for (ReservationExtra extra : savedReservation.getExtras()) {
+                        if (Boolean.TRUE.equals(extra.getIsActive())) {
+                            facture.addItem(InvoiceItem.builder()
+                                    .description(extra.getName())
+                                    .itemType("EXTRA")
+                                    .quantity(extra.getQuantity() != null ? extra.getQuantity() : 1)
+                                    .unitPrice(extra.getUnitPrice() != null ? extra.getUnitPrice() : 0.0)
+                                    .lineNumber(line++)
+                                    .build());
+                        }
+                    }
+                }
+
+                invoiceRepository.save(facture);
+
+                notificationPublisher.publish(
+                        RabbitMQConfig.RESERVATION_CONFIRMED,
+                        NotificationMessage.builder()
+                                .targetUserId(savedReservation.getUser().getUserId())
+                                .type(NotificationType.RESERVATION_CONFIRMED)
+                                .reservationId(savedReservation.getReservationId())
+                                .title("Réservation terminée")
+                                .message("Votre réservation pour le groupe \""
+                                        + savedReservation.getGroupName()
+                                        + "\" est terminée. Votre facture est disponible.")
+                                .build()
+                );
+            } else {
+                // ── Completed without generating a facture ────────────────
+                notificationPublisher.publish(
+                        RabbitMQConfig.RESERVATION_CONFIRMED,
+                        NotificationMessage.builder()
+                                .targetUserId(savedReservation.getUser().getUserId())
+                                .type(NotificationType.RESERVATION_CONFIRMED)
+                                .reservationId(savedReservation.getReservationId())
+                                .title("Réservation terminée")
+                                .message("Votre réservation pour le groupe \""
+                                        + savedReservation.getGroupName()
+                                        + "\" est terminée.")
+                                .build()
+                );
             }
-            if (savedReservation.getTotalExtrasAmount() != null && savedReservation.getTotalExtrasAmount() > 0) {
-                facture.addItem(InvoiceItem.builder()
-                        .description("Extras")
-                        .itemType("EXTRA")
-                        .quantity(1)
-                        .unitPrice(savedReservation.getTotalExtrasAmount())
-                        .lineNumber(line)
-                        .build());
-            }
-
-            invoiceRepository.save(facture);
-
-            // Notify user
-            notificationPublisher.publish(
-                    RabbitMQConfig.RESERVATION_CONFIRMED,
-                    NotificationMessage.builder()
-                            .targetUserId(savedReservation.getUser().getUserId())
-                            .type(NotificationType.RESERVATION_CONFIRMED)
-                            .reservationId(savedReservation.getReservationId())
-                            .title("Réservation terminée")
-                            .message("Votre réservation pour le groupe \""
-                                    + savedReservation.getGroupName()
-                                    + "\" est terminée. Votre facture est disponible.")
-                            .build()
-            );
         }
 
         if (status == ReservationStatus.REJECTED) {

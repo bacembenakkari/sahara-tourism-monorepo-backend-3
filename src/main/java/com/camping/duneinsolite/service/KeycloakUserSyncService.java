@@ -115,7 +115,7 @@ public class KeycloakUserSyncService {
         log.info("User {} created and saved with id {}", request.getEmail(), savedUser.getUserId());
 
         // ── Send welcome email with generated password ──
-        emailService.sendWelcomeEmail(request.getEmail(), request.getName(), generatedPassword);
+       // emailService.sendWelcomeEmail(request.getEmail(), request.getName(), generatedPassword);
 
         return savedUser;
     }

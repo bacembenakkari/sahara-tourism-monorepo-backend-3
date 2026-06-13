@@ -3,6 +3,7 @@ package com.camping.duneinsolite.controller;
 import com.camping.duneinsolite.dto.request.InvoiceRequest;
 import com.camping.duneinsolite.dto.response.InvoiceResponse;
 import com.camping.duneinsolite.service.InvoiceService;
+import com.camping.duneinsolite.service.impl.InvoiceEmailService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -17,7 +18,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class InvoiceController {
 
-    private final InvoiceService invoiceService;
+    private final InvoiceService      invoiceService;
+    private final InvoiceEmailService invoiceEmailService;
 
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'CAMPING')")
@@ -74,5 +76,19 @@ public class InvoiceController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<InvoiceResponse>> getFacturesByReservation(@PathVariable UUID reservationId) {
         return ResponseEntity.ok(invoiceService.getFacturesByReservation(reservationId));
+    }
+
+    @PostMapping("/{invoiceId}/send-proforma")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CAMPING')")
+    public ResponseEntity<Void> sendProforma(@PathVariable UUID invoiceId) {
+        invoiceEmailService.sendProformaByEmail(invoiceId);
+        return ResponseEntity.accepted().build();
+    }
+
+    @PostMapping("/{invoiceId}/send-facture")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CAMPING')")
+    public ResponseEntity<Void> sendFacture(@PathVariable UUID invoiceId) {
+        invoiceEmailService.sendFactureByEmail(invoiceId);
+        return ResponseEntity.accepted().build();
     }
 }

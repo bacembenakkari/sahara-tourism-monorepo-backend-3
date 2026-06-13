@@ -1,18 +1,22 @@
 package com.camping.duneinsolite.service.impl;
 
 import com.camping.duneinsolite.dto.request.InvoiceRequest;
+import com.camping.duneinsolite.dto.response.InvoiceItemResponse;
 import com.camping.duneinsolite.dto.response.InvoiceResponse;
 import com.camping.duneinsolite.mapper.InvoiceMapper;
 import com.camping.duneinsolite.model.*;
 import com.camping.duneinsolite.model.enums.InvoiceStatus;
 import com.camping.duneinsolite.model.enums.InvoiceType;
 import com.camping.duneinsolite.model.enums.PaymentStatus;
+import com.camping.duneinsolite.model.enums.ReservationType;
 import com.camping.duneinsolite.repository.*;
 import com.camping.duneinsolite.service.InvoiceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -116,7 +120,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     public List<InvoiceResponse> getAllFactures() {
         return invoiceRepository.findByInvoiceType(InvoiceType.STANDARD)
                 .stream()
-                .map(invoiceMapper::toResponse)
+                .map(this::toFactureResponse)
                 .toList();
     }
 
@@ -126,8 +130,69 @@ public class InvoiceServiceImpl implements InvoiceService {
         return invoiceRepository
                 .findByInvoiceTypeAndReservationReservationId(InvoiceType.STANDARD, reservationId)
                 .stream()
-                .map(invoiceMapper::toResponse)
+                .map(this::toFactureResponse)
                 .toList();
+    }
+
+    // Compute items dynamically from reservation so all factures show per-type lines
+    private InvoiceResponse toFactureResponse(Invoice invoice) {
+        InvoiceResponse response = invoiceMapper.toResponse(invoice);
+        response.setItems(computeItemsFromReservation(invoice.getReservation()));
+        return response;
+    }
+
+    private List<InvoiceItemResponse> computeItemsFromReservation(Reservation r) {
+        List<InvoiceItemResponse> items = new ArrayList<>();
+        if (r == null) return items;
+        int line = 1;
+
+        // HEBERGEMENT: one line per tour type — qty = people, unitPrice = totalStay ÷ people
+        if (r.getReservationType() == ReservationType.HEBERGEMENT
+                && r.getTourTypes() != null && !r.getTourTypes().isEmpty()) {
+            for (ReservationTourType tt : r.getTourTypes()) {
+                int qty = Optional.ofNullable(tt.getNumberOfAdults()).orElse(0)
+                        + Optional.ofNullable(tt.getNumberOfChildren()).orElse(0);
+                if (qty == 0) qty = 1;
+                double unitP = Math.round((tt.getTotalPrice() / qty) * 1000.0) / 1000.0;
+                items.add(buildItem(line++, tt.getName(), "HEBERGEMENT", qty, unitP));
+            }
+        // TOURS: one line per tour — qty = people, unitPrice = totalTour ÷ people
+        } else if (r.getReservationType() == ReservationType.TOURS
+                && r.getTours() != null && !r.getTours().isEmpty()) {
+            for (ReservationTour t : r.getTours()) {
+                int qty = Optional.ofNullable(t.getNumberOfAdults()).orElse(0)
+                        + Optional.ofNullable(t.getNumberOfChildren()).orElse(0);
+                if (qty == 0) qty = 1;
+                double unitP = t.getTotalPrice() != null
+                        ? Math.round((t.getTotalPrice() / qty) * 1000.0) / 1000.0 : 0.0;
+                items.add(buildItem(line++, t.getName(), "TOURS", qty, unitP));
+            }
+        }
+
+        // EXTRAS: one line per active extra
+        if (r.getExtras() != null) {
+            for (ReservationExtra extra : r.getExtras()) {
+                if (Boolean.TRUE.equals(extra.getIsActive())) {
+                    int qty  = Optional.ofNullable(extra.getQuantity()).orElse(1);
+                    double unitP = Optional.ofNullable(extra.getUnitPrice()).orElse(0.0);
+                    items.add(buildItem(line++, extra.getName(), "EXTRA", qty, unitP));
+                }
+            }
+        }
+
+        return items;
+    }
+
+    private InvoiceItemResponse buildItem(int lineNumber, String description,
+                                          String itemType, int quantity, double unitPrice) {
+        InvoiceItemResponse item = new InvoiceItemResponse();
+        item.setLineNumber(lineNumber);
+        item.setDescription(description);
+        item.setItemType(itemType);
+        item.setQuantity(quantity);
+        item.setUnitPrice(unitPrice);
+        item.setTotalPrice(Math.round(quantity * unitPrice * 1000.0) / 1000.0);
+        return item;
     }
 
 }
