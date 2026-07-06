@@ -64,3 +64,6 @@ app:
     from: noreply@duneinsolite.com        # display sender address in outgoing emails
   frontend:
     url: http://localhost:4200            # ← replace with your deployed frontend URL in production
+  currency:
+    eur-rate: 3.4   # 1 EUR = 3.4 TND  (TND / 3.4 → EUR)
+    usd-rate: 2.5   # 1 USD = 2.5 TND  (TND / 2.5 → USD)

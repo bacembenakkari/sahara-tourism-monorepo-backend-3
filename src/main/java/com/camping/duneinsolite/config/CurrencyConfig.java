@@ -1,8 +1,19 @@
 package com.camping.duneinsolite.config;
 
-public class CurrencyConfig {
-    public static final double TND_TO_EUR = 3.5;
-    public static final double TND_TO_USD = 2.9;
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
 
-    private CurrencyConfig() {}
+@Getter
+@Setter
+@Component
+@ConfigurationProperties(prefix = "app.currency")
+public class CurrencyConfig {
+
+    /** How many TND equal 1 EUR  (TND ÷ eurRate → EUR) */
+    private double eurRate = 3.4;
+
+    /** How many TND equal 1 USD  (TND ÷ usdRate → USD) */
+    private double usdRate = 2.5;
 }

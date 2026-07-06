@@ -31,6 +31,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final ReservationRepository reservationRepository;
     private final TransactionMapper transactionMapper;
     private final NotificationPublisher notificationPublisher;
+    private final CurrencyConfig currencyConfig;
 
     @Override
     public PaymentResponse recordPayment(UUID reservationId, PaymentRequest request) {
@@ -105,35 +106,51 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     // ── Currency conversion ───────────────────────────────────────
+    // Called once at first non-TND payment. Converts every stored price on
+    // the reservation and all its child records (tour types, tours, extras).
     private void applyCurrencyConversion(Reservation reservation, Currency targetCurrency) {
+        if (targetCurrency == Currency.TND) {
+            reservation.setCurrency(Currency.TND);
+            return;
+        }
         double rate = switch (targetCurrency) {
-            case EUR -> CurrencyConfig.TND_TO_EUR;
-            case USD -> CurrencyConfig.TND_TO_USD;
+            case EUR -> currencyConfig.getEurRate();
+            case USD -> currencyConfig.getUsdRate();
             case TND -> 1.0;
         };
 
-        if (reservation.getTotalAmount() != null) {
-            reservation.setTotalAmount(
-                    Math.round(reservation.getTotalAmount() * rate * 100.0) / 100.0
-            );
-        }
-        if (reservation.getTotalExtrasAmount() != null) {
-            reservation.setTotalExtrasAmount(
-                    Math.round(reservation.getTotalExtrasAmount() * rate * 100.0) / 100.0
-            );
-        }
+        if (reservation.getTotalAmount() != null)
+            reservation.setTotalAmount(r2(reservation.getTotalAmount() / rate));
+        if (reservation.getTotalExtrasAmount() != null)
+            reservation.setTotalExtrasAmount(r2(reservation.getTotalExtrasAmount() / rate));
+
+        reservation.getTourTypes().forEach(tt -> {
+            tt.setAdultPrice(r2(tt.getAdultPrice() / rate));
+            tt.setChildPrice(r2(tt.getChildPrice() / rate));
+        });
+
+        reservation.getTours().forEach(tour -> {
+            tour.setAdultPrice(r2(tour.getAdultPrice() / rate));
+            tour.setChildPrice(r2(tour.getChildPrice() / rate));
+            tour.setTotalPrice(r2(tour.getTotalPrice() / rate));
+        });
+
+        reservation.getExtras().forEach(extra -> {
+            extra.setUnitPrice(r2(extra.getUnitPrice() / rate));
+            extra.setTotalPrice(r2(extra.getTotalPrice() / rate));
+        });
 
         reservation.setCurrency(targetCurrency);
     }
 
     // ── Compute payment summary ───────────────────────────────────
+    // All stored amounts are already in the reservation's currency — just read them.
     @Override
     @Transactional(readOnly = true)
     public PaymentSummary computePaymentSummary(Reservation reservation) {
-
-        double originalMain   = reservation.getTotalAmount()       != null ? reservation.getTotalAmount()       : 0.0;
-        double originalExtras = reservation.getTotalExtrasAmount() != null ? reservation.getTotalExtrasAmount() : 0.0;
-        double originalTotal  = originalMain + originalExtras;
+        double main   = reservation.getTotalAmount()       != null ? reservation.getTotalAmount()       : 0.0;
+        double extras = reservation.getTotalExtrasAmount() != null ? reservation.getTotalExtrasAmount() : 0.0;
+        double total  = r2(main + extras);
 
         double totalPaid = transactionRepository
                 .sumCompletedAmountByReservationId(reservation.getReservationId());
@@ -141,16 +158,16 @@ public class PaymentServiceImpl implements PaymentService {
         double remainingMain;
         double remainingExtras;
 
-        if (totalPaid >= originalMain) {
+        if (totalPaid >= main) {
             remainingMain   = 0.0;
-            double overflow = totalPaid - originalMain;
-            remainingExtras = Math.max(0.0, originalExtras - overflow);
+            double overflow = totalPaid - main;
+            remainingExtras = Math.max(0.0, r2(extras - overflow));
         } else {
-            remainingMain   = originalMain - totalPaid;
-            remainingExtras = originalExtras;
+            remainingMain   = r2(main - totalPaid);
+            remainingExtras = extras;
         }
 
-        double remainingTotal = remainingMain + remainingExtras;
+        double remainingTotal = r2(remainingMain + remainingExtras);
 
         PaymentStatus paymentStatus;
         if (totalPaid <= 0) {
@@ -162,15 +179,19 @@ public class PaymentServiceImpl implements PaymentService {
         }
 
         return PaymentSummary.builder()
-                .originalMainAmount(originalMain)
-                .originalExtrasAmount(originalExtras)
-                .originalTotalAmount(originalTotal)
+                .originalMainAmount(main)
+                .originalExtrasAmount(extras)
+                .originalTotalAmount(total)
                 .totalPaid(totalPaid)
                 .remainingMainAmount(remainingMain)
                 .remainingExtrasAmount(remainingExtras)
                 .remainingTotal(remainingTotal)
                 .paymentStatus(paymentStatus)
                 .build();
+    }
+
+    private static double r2(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 
     // ── Build transaction ─────────────────────────────────────────

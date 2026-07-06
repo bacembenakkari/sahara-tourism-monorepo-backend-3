@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.UuidGenerator;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -20,6 +22,10 @@ public class ReservationTour {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "reservation_id", nullable = false)
     private Reservation reservation;
+
+    // FK to Tour catalog (snapshot reference)
+    @Column(name = "catalog_tour_id")
+    private UUID catalogTourId;
 
     // ── Snapshots from Tour catalog at booking time ──────────────
     @Column(name = "name", nullable = false)
@@ -51,4 +57,13 @@ public class ReservationTour {
     // Formula: (numberOfAdults * adultPrice) + (numberOfChildren * childPrice)
     @Column(name = "total_price", nullable = false)
     private Double totalPrice;
+
+    @OneToMany(mappedBy = "reservationTour", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<ReservationTourHebergement> hebergements = new ArrayList<>();
+
+    public void addHebergement(ReservationTourHebergement h) {
+        hebergements.add(h);
+        h.setReservationTour(this);
+    }
 }

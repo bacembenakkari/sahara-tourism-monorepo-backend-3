@@ -29,8 +29,8 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
     @Query("""
     SELECT r FROM Reservation r
     WHERE r.status != com.camping.duneinsolite.model.enums.ReservationStatus.COMPLETED
-    ORDER BY 
-      CASE 
+    ORDER BY
+      CASE
         WHEN (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
               AND r.checkInDate >= :today)
           OR (r.reservationType != com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
@@ -38,8 +38,8 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
         THEN 0
         ELSE 1
       END ASC,
-      CASE 
-        WHEN r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT 
+      CASE
+        WHEN r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
         THEN r.checkInDate
         ELSE r.serviceDate
       END ASC
@@ -58,45 +58,47 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
     List<Reservation> findAllByDate(@Param("date") LocalDate date);
 
 
-    // camping
+    // ── camping active — HEBERGEMENT + EXTRAS + TOURS with hebergements ──────────
     @Query("""
     SELECT r FROM Reservation r
-    WHERE r.reservationType IN (
-        com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT,
-        com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
-    )
-    AND (
-        (
-            r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
-            AND r.status IN (
-                com.camping.duneinsolite.model.enums.ReservationStatus.PENDING,
-                com.camping.duneinsolite.model.enums.ReservationStatus.CONFIRMED,
-                com.camping.duneinsolite.model.enums.ReservationStatus.CHECKED_IN
-            )
-            AND r.checkInDate >= :today
-        )
+    WHERE (
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
+         AND r.status IN (
+             com.camping.duneinsolite.model.enums.ReservationStatus.PENDING,
+             com.camping.duneinsolite.model.enums.ReservationStatus.CONFIRMED,
+             com.camping.duneinsolite.model.enums.ReservationStatus.CHECKED_IN
+         )
+         AND r.checkInDate >= :today)
         OR
-        (
-            r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
-            AND r.status = com.camping.duneinsolite.model.enums.ReservationStatus.COMPLETED
-            AND r.completedAt >= :cutoff
-        )
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
+         AND r.status = com.camping.duneinsolite.model.enums.ReservationStatus.COMPLETED
+         AND r.completedAt >= :cutoff)
         OR
-        (
-            r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
-            AND r.status IN (
-                com.camping.duneinsolite.model.enums.ReservationStatus.PENDING,
-                com.camping.duneinsolite.model.enums.ReservationStatus.CONFIRMED,
-                com.camping.duneinsolite.model.enums.ReservationStatus.CHECKED_IN
-            )
-            AND r.serviceDate >= :today
-        )
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
+         AND r.status IN (
+             com.camping.duneinsolite.model.enums.ReservationStatus.PENDING,
+             com.camping.duneinsolite.model.enums.ReservationStatus.CONFIRMED,
+             com.camping.duneinsolite.model.enums.ReservationStatus.CHECKED_IN
+         )
+         AND r.serviceDate >= :today)
         OR
-        (
-            r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
-            AND r.status = com.camping.duneinsolite.model.enums.ReservationStatus.COMPLETED
-            AND r.completedAt >= :cutoff
-        )
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
+         AND r.status = com.camping.duneinsolite.model.enums.ReservationStatus.COMPLETED
+         AND r.completedAt >= :cutoff)
+        OR
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.TOURS
+         AND r.status IN (
+             com.camping.duneinsolite.model.enums.ReservationStatus.PENDING,
+             com.camping.duneinsolite.model.enums.ReservationStatus.CONFIRMED,
+             com.camping.duneinsolite.model.enums.ReservationStatus.CHECKED_IN
+         )
+         AND EXISTS (SELECT h FROM ReservationTourHebergement h JOIN h.reservationTour t WHERE t.reservation = r)
+         AND (SELECT MIN(h2.activityDate) FROM ReservationTourHebergement h2 JOIN h2.reservationTour t2 WHERE t2.reservation = r) >= :today)
+        OR
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.TOURS
+         AND r.status = com.camping.duneinsolite.model.enums.ReservationStatus.COMPLETED
+         AND r.completedAt >= :cutoff
+         AND EXISTS (SELECT h FROM ReservationTourHebergement h JOIN h.reservationTour t WHERE t.reservation = r))
     )
     ORDER BY
         CASE
@@ -117,10 +119,6 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
         com.camping.duneinsolite.model.enums.ReservationStatus.CHECKED_IN,
         com.camping.duneinsolite.model.enums.ReservationStatus.PENDING
     )
-    AND r.reservationType IN (
-        com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT,
-        com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
-    )
     AND LOWER(r.user.name) LIKE LOWER(CONCAT('%', :name, '%'))
     AND (
         (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
@@ -128,6 +126,10 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
         OR
         (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
          AND r.serviceDate >= :today)
+        OR
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.TOURS
+         AND EXISTS (SELECT h FROM ReservationTourHebergement h JOIN h.reservationTour t WHERE t.reservation = r)
+         AND (SELECT MIN(h2.activityDate) FROM ReservationTourHebergement h2 JOIN h2.reservationTour t2 WHERE t2.reservation = r) >= :today)
     )
     ORDER BY r.createdAt DESC
 """)
@@ -136,16 +138,16 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
     @Query("""
     SELECT r FROM Reservation r
     WHERE r.status = :status
-    AND r.reservationType IN (
-        com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT,
-        com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
-    )
     AND (
         (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
          AND r.checkInDate >= :today)
         OR
         (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
          AND r.serviceDate >= :today)
+        OR
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.TOURS
+         AND EXISTS (SELECT h FROM ReservationTourHebergement h JOIN h.reservationTour t WHERE t.reservation = r)
+         AND (SELECT MIN(h2.activityDate) FROM ReservationTourHebergement h2 JOIN h2.reservationTour t2 WHERE t2.reservation = r) >= :today)
     )
     ORDER BY
       CASE
@@ -156,37 +158,38 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
 """)
     List<Reservation> findCampingActiveByStatus(@Param("status") ReservationStatus status, @Param("today") LocalDate today);
 
-    // by-date — all statuses, HEBERGEMENT + EXTRAS only, exact date match
+    // by-date — HEBERGEMENT + EXTRAS + TOURS with hebergement on that date
     @Query("""
     SELECT r FROM Reservation r
-    WHERE r.reservationType IN (
-        com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT,
-        com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
-    )
-    AND (
+    WHERE (
         (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
          AND r.checkInDate = :date)
         OR
         (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
          AND r.serviceDate = :date)
+        OR
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.TOURS
+         AND EXISTS (SELECT h FROM ReservationTourHebergement h JOIN h.reservationTour t WHERE t.reservation = r AND h.activityDate = :date))
     )
     ORDER BY r.createdAt DESC
 """)
     List<Reservation> findCampingActiveByDate(@Param("date") LocalDate date);
 
 
-    // CHECKED_IN — HEBERGEMENT + EXTRAS only
+    // CHECKED_IN — HEBERGEMENT + EXTRAS + TOURS with hebergements
     @Query("""
     SELECT r FROM Reservation r
     WHERE r.status = com.camping.duneinsolite.model.enums.ReservationStatus.CHECKED_IN
-    AND r.reservationType IN (
-        com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT,
-        com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
+    AND (
+        r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.HEBERGEMENT
+        OR r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
+        OR (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.TOURS
+            AND EXISTS (SELECT h FROM ReservationTourHebergement h JOIN h.reservationTour t WHERE t.reservation = r))
     )
 """)
     List<Reservation> findCampingCheckedIn();
 
-    // CONFIRMED + arriving today — HEBERGEMENT checkInDate=today, EXTRAS serviceDate=today
+    // CONFIRMED + arriving today — HEBERGEMENT/EXTRAS/TOURS with hebergement
     @Query("""
     SELECT r FROM Reservation r
     WHERE r.status = com.camping.duneinsolite.model.enums.ReservationStatus.CONFIRMED
@@ -196,6 +199,9 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
         OR
         (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.EXTRAS
          AND r.serviceDate = :today)
+        OR
+        (r.reservationType = com.camping.duneinsolite.model.enums.ReservationType.TOURS
+         AND EXISTS (SELECT h FROM ReservationTourHebergement h JOIN h.reservationTour t WHERE t.reservation = r AND h.activityDate = :today))
     )
 """)
     List<Reservation> findCampingArrivingToday(@Param("today") LocalDate today);

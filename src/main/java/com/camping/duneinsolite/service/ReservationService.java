@@ -44,4 +44,6 @@ public interface ReservationService {
 
     CampingStatsResponse getCampingStats();
 
+    ReservationResponse recalculateCurrency(UUID reservationId);
+
 }

@@ -12,6 +12,7 @@ public class ReservationUpdateRequest {
     // ── Simple fields ──────────────────────────────────────
     private LocalDate checkInDate;
     private LocalDate checkOutDate;
+    private LocalDate serviceDate;
     private String groupName;
     private String groupLeaderName;
     private String demandeSpecial;
@@ -26,4 +27,7 @@ public class ReservationUpdateRequest {
     private List<ParticipantRequest> participants;         // same DTO as create
     private List<ReservationExtraRequest> extras;          // same DTO as create
     private List<RepartitionRequest> repartitions;
+
+    // Hebergements attached to the tour (TOURS type only)
+    private List<TourHebergementRequest> hebergements;
 }

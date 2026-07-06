@@ -11,10 +11,14 @@ import com.camping.duneinsolite.exception.ReservationStatusException;
 import com.camping.duneinsolite.mapper.ReservationMapper;
 import com.camping.duneinsolite.model.*;
 import com.camping.duneinsolite.model.enums.*;
+import com.camping.duneinsolite.dto.request.TourHebergementRequest;
+import com.camping.duneinsolite.dto.request.TourHebergementRepartitionRequest;
 import com.camping.duneinsolite.repository.*;
 import com.camping.duneinsolite.service.NotificationPublisher;
 import com.camping.duneinsolite.service.ReservationService;
+import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -56,7 +60,10 @@ public class ReservationServiceImpl implements ReservationService {
     private final TransactionMapper transactionMapper;
     private final TransactionRepository transactionRepository;
     private final InvoiceRepository invoiceRepository;
+    private final CurrencyConfig             currencyConfig;
 
+    @PersistenceContext
+    private EntityManager entityManager;
 
     // ─────────────────────────────────────────────────────────────
     // CREATE
@@ -315,6 +322,12 @@ public class ReservationServiceImpl implements ReservationService {
                                      boolean isPartner) {
             ReservationTour reservationTour = buildTourSnapshot(
                     request, globalAdults, globalChildren, isPartner);
+
+            TourSelectionRequest tourSelection = request.getTours().get(0);
+            if (tourSelection.getHebergements() != null && !tourSelection.getHebergements().isEmpty()) {
+                applyTourHebergements(tourSelection.getHebergements(), reservationTour);
+            }
+
             reservation.addTour(reservationTour);
             reservation.setTotalAmount(reservation.calculateTotalToursAmount());
         }
@@ -332,6 +345,7 @@ public class ReservationServiceImpl implements ReservationService {
             double totalPrice = (globalAdults * adultPrice) + (globalChildren * childPrice);
 
             return ReservationTour.builder()
+                    .catalogTourId(tour.getTourId())
                     .name(tour.getName())
                     .description(tour.getDescription())
                     .duration(tour.getDuration())
@@ -342,6 +356,36 @@ public class ReservationServiceImpl implements ReservationService {
                     .departureDate(request.getServiceDate())
                     .totalPrice(totalPrice)
                     .build();
+        }
+
+        private void applyTourHebergements(List<TourHebergementRequest> hebergementRequests,
+                                           ReservationTour reservationTour) {
+            for (TourHebergementRequest req : hebergementRequests) {
+                TourType tourType = tourTypeRepository.findById(req.getTourTypeId())
+                        .orElseThrow(() -> new RuntimeException("TourType not found: " + req.getTourTypeId()));
+
+                ReservationTourHebergement hebergement = ReservationTourHebergement.builder()
+                        .name(tourType.getName())
+                        .description(tourType.getDescription())
+                        .duration(tourType.getDuration())
+                        .numberOfNights(req.getNumberOfNights() != null ? req.getNumberOfNights() : 1)
+                        .numberOfAdults(req.getNumberOfAdults())
+                        .numberOfChildren(req.getNumberOfChildren())
+                        .activityDate(req.getActivityDate())
+                        .build();
+
+                if (req.getRepartitions() != null) {
+                    for (TourHebergementRepartitionRequest repReq : req.getRepartitions()) {
+                        ReservationTourHebergementRepartition rep = ReservationTourHebergementRepartition.builder()
+                                .tenteType(repReq.getTenteType())
+                                .numberOfTentes(repReq.getNumberOfTentes())
+                                .build();
+                        hebergement.addRepartition(rep);
+                    }
+                }
+
+                reservationTour.addHebergement(hebergement);
+            }
         }
 
     // ── Participants ──────────────────────────────────────────────────────────────
@@ -799,6 +843,7 @@ public class ReservationServiceImpl implements ReservationService {
 
         if (request.getCheckInDate()     != null) reservation.setCheckInDate(request.getCheckInDate());
         if (request.getCheckOutDate()    != null) reservation.setCheckOutDate(request.getCheckOutDate());
+        if (request.getServiceDate()     != null) reservation.setServiceDate(request.getServiceDate());
         if (request.getGroupName()       != null) reservation.setGroupName(request.getGroupName());
         if (request.getGroupLeaderName() != null) reservation.setGroupLeaderName(request.getGroupLeaderName());
         if (request.getDemandeSpecial()  != null) reservation.setDemandeSpecial(request.getDemandeSpecial());
@@ -850,6 +895,13 @@ public class ReservationServiceImpl implements ReservationService {
 
             reservation.getTourTypes().clear();
 
+            Currency resCurrency = reservation.getCurrency() != null ? reservation.getCurrency() : Currency.TND;
+            double tourTypeRate = switch (resCurrency) {
+                case EUR -> currencyConfig.getEurRate();
+                case USD -> currencyConfig.getUsdRate();
+                case TND -> 1.0;
+            };
+
             for (TourTypeSelectionRequest selection : request.getTourTypes()) {
                 TourType tourType = tourTypeRepository.findById(selection.getTourTypeId())
                         .orElseThrow(() -> new RuntimeException("TourType not found: " + selection.getTourTypeId()));
@@ -864,8 +916,8 @@ public class ReservationServiceImpl implements ReservationService {
                         .name(tourType.getName())
                         .description(tourType.getDescription())
                         .duration(tourType.getDuration())
-                        .adultPrice(adultPrice)
-                        .childPrice(childPrice)
+                        .adultPrice(r2(adultPrice / tourTypeRate))
+                        .childPrice(r2(childPrice / tourTypeRate))
                         .numberOfAdults(adults)
                         .numberOfChildren(children)
                         .numberOfNights((int) nights)
@@ -889,18 +941,28 @@ public class ReservationServiceImpl implements ReservationService {
         }
 
         if (request.getExtras() != null) {
+            Currency extraCurrency = reservation.getCurrency() != null ? reservation.getCurrency() : Currency.TND;
+            double extraRate = switch (extraCurrency) {
+                case EUR -> currencyConfig.getEurRate();
+                case USD -> currencyConfig.getUsdRate();
+                case TND -> 1.0;
+            };
+
             reservation.getExtras().clear();
             request.getExtras().forEach(e -> {
                 Extra catalog = extraRepository.findById(e.getExtraId())
                         .orElseThrow(() -> new RuntimeException("Extra not found: " + e.getExtraId()));
+
+                double unitPrice  = r2(catalog.getUnitPrice() / extraRate);
+                double totalPrice = r2(unitPrice * e.getQuantity());
 
                 ReservationExtra extra = ReservationExtra.builder()
                         .name(catalog.getName())
                         .description(catalog.getDescription())
                         .duration(catalog.getDuration())
                         .quantity(e.getQuantity())
-                        .unitPrice(catalog.getUnitPrice())
-                        .totalPrice(catalog.getUnitPrice() * e.getQuantity())
+                        .unitPrice(unitPrice)
+                        .totalPrice(totalPrice)
                         .isActive(true)
                         .build();
                 reservation.addExtra(extra);
@@ -914,6 +976,16 @@ public class ReservationServiceImpl implements ReservationService {
             reservation.getRepartitions().clear();
             applyRepartitions(request.getRepartitions(), reservation);
         }
+
+        // ── TOURS: update hebergements if provided ────────────────────────────────
+        if (request.getHebergements() != null
+                && reservation.getReservationType() == ReservationType.TOURS
+                && !reservation.getTours().isEmpty()) {
+            ReservationTour reservationTour = reservation.getTours().get(0);
+            reservationTour.getHebergements().clear();
+            applyTourHebergements(request.getHebergements(), reservationTour);
+        }
+
         Reservation savedReservation = reservationRepository.save(reservation);
 
         notificationPublisher.publish(
@@ -962,7 +1034,11 @@ public class ReservationServiceImpl implements ReservationService {
     }
     private ReservationResponse toEnrichedResponse(Reservation reservation) {
         ReservationResponse response = reservationMapper.toResponse(reservation);
-        response.setPaymentSummary(paymentService.computePaymentSummary(reservation));
+        PaymentSummary summary = paymentService.computePaymentSummary(reservation);
+        response.setPaymentSummary(summary);
+        // Always override with snapshot-derived amounts so stale DB values never reach the frontend
+        response.setTotalAmount(summary.getOriginalMainAmount());
+        response.setTotalExtrasAmount(summary.getOriginalExtrasAmount());
         List<TransactionResponse> txHistory = transactionRepository
                 .findByReservationReservationId(reservation.getReservationId())
                 .stream()
@@ -1229,25 +1305,45 @@ public class ReservationServiceImpl implements ReservationService {
                 : "#" + reservation.getReservationId().toString().substring(0, 8).toUpperCase();
     }
 
+    // Called once at reservation creation when initial payment currency != TND.
+    // Converts every price field so the DB always holds values in the target currency.
     private void applyReservationCurrencyConversion(Reservation reservation, Currency targetCurrency) {
+        if (targetCurrency == Currency.TND) {
+            reservation.setCurrency(Currency.TND);
+            return;
+        }
         double rate = switch (targetCurrency) {
-            case EUR -> CurrencyConfig.TND_TO_EUR;
-            case USD -> CurrencyConfig.TND_TO_USD;
+            case EUR -> currencyConfig.getEurRate();
+            case USD -> currencyConfig.getUsdRate();
             case TND -> 1.0;
         };
 
-        if (reservation.getTotalAmount() != null) {
-            reservation.setTotalAmount(
-                    Math.round(reservation.getTotalAmount() * rate * 100.0) / 100.0
-            );
-        }
-        if (reservation.getTotalExtrasAmount() != null) {
-            reservation.setTotalExtrasAmount(
-                    Math.round(reservation.getTotalExtrasAmount() * rate * 100.0) / 100.0
-            );
-        }
+        if (reservation.getTotalAmount() != null)
+            reservation.setTotalAmount(r2(reservation.getTotalAmount() / rate));
+        if (reservation.getTotalExtrasAmount() != null)
+            reservation.setTotalExtrasAmount(r2(reservation.getTotalExtrasAmount() / rate));
+
+        reservation.getTourTypes().forEach(tt -> {
+            tt.setAdultPrice(r2(tt.getAdultPrice() / rate));
+            tt.setChildPrice(r2(tt.getChildPrice() / rate));
+        });
+
+        reservation.getTours().forEach(tour -> {
+            tour.setAdultPrice(r2(tour.getAdultPrice() / rate));
+            tour.setChildPrice(r2(tour.getChildPrice() / rate));
+            tour.setTotalPrice(r2(tour.getTotalPrice() / rate));
+        });
+
+        reservation.getExtras().forEach(extra -> {
+            extra.setUnitPrice(r2(extra.getUnitPrice() / rate));
+            extra.setTotalPrice(r2(extra.getTotalPrice() / rate));
+        });
 
         reservation.setCurrency(targetCurrency);
+    }
+
+    private static double r2(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 
     @Override
@@ -1279,7 +1375,19 @@ public class ReservationServiceImpl implements ReservationService {
     private LocalDate getRelevantDate(Reservation reservation) {
         return switch (reservation.getReservationType()) {
             case HEBERGEMENT -> reservation.getCheckInDate();
-            case TOURS, EXTRAS -> reservation.getServiceDate();
+            case EXTRAS -> reservation.getServiceDate();
+            case TOURS -> {
+                if (reservation.getTours() != null) {
+                    LocalDate earliest = reservation.getTours().stream()
+                            .flatMap(t -> t.getHebergements().stream())
+                            .map(ReservationTourHebergement::getActivityDate)
+                            .filter(d -> d != null)
+                            .min(LocalDate::compareTo)
+                            .orElse(null);
+                    if (earliest != null) yield earliest;
+                }
+                yield reservation.getServiceDate();
+            }
         };
     }
 
@@ -1361,9 +1469,29 @@ public class ReservationServiceImpl implements ReservationService {
     private double getTimbreFiscal(Currency currency) {
         return switch (currency) {
             case TND -> 1.000;
-            case EUR -> Math.round((1.0 / 3.4) * 1000.0) / 1000.0;  // 0.294
-            case USD -> Math.round((1.0 / 2.5) * 1000.0) / 1000.0;  // 0.400
+            case EUR -> Math.round((1.0 / currencyConfig.getEurRate()) * 1000.0) / 1000.0;
+            case USD -> Math.round((1.0 / currencyConfig.getUsdRate()) * 1000.0) / 1000.0;
         };
+    }
+
+    @Override
+    @Transactional
+    public ReservationResponse recalculateCurrency(UUID reservationId) {
+        Reservation reservation = reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new RuntimeException("Reservation not found: " + reservationId));
+
+        // Prices on tour types / tours / extras are already in the reservation's currency.
+        // Just recompute the aggregate totals from those stored values.
+        switch (reservation.getReservationType()) {
+            case HEBERGEMENT -> reservation.setTotalAmount(reservation.calculateTotalTourTypesAmount());
+            case TOURS       -> reservation.setTotalAmount(reservation.calculateTotalToursAmount());
+            case EXTRAS      -> { /* no main amount for pure-extras reservations */ }
+        }
+        reservation.setTotalExtrasAmount(reservation.calculateTotalExtrasAmount());
+
+        reservationRepository.saveAndFlush(reservation);
+        entityManager.detach(reservation);
+        return toEnrichedResponse(findById(reservationId));
     }
 
     @Override

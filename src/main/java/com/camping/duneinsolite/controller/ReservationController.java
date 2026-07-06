@@ -191,5 +191,11 @@ public class ReservationController {
     public ResponseEntity<CampingStatsResponse> getCampingStats() {
         return ResponseEntity.ok(reservationService.getCampingStats());
     }
+
+    @PostMapping("/{reservationId}/recalculate-currency")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ReservationResponse> recalculateCurrency(@PathVariable UUID reservationId) {
+        return ResponseEntity.ok(reservationService.recalculateCurrency(reservationId));
+    }
 }
 
